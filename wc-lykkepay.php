@@ -50,24 +50,34 @@ function woocommerce_lykkepay()
                     $action_adr = LYKKE_PROD_URL;
                 }
 
-                $action_adr .= 'getOrderStatusExtended.do';
+                $action_adr .= 'status';
 
                 $args = array(
-                    'merchantId' => $_SESSION['merchantId'],//$this->get_option('merchant'),
-                    'signature' => $_SESSION['signature'],//$this->get_option('password'),
-                    'orderId' => $_GET['orderId'],
+                    'invoiceId' => $_SESSION['invoiceid']
                 );
-                $_SESSION['merchantId'] = '';
-                $_SESSION['signature'] = '';
-                $_SESSION['testmode'] = '';
+	            $lykkepayCurl = curl_init();
+	            curl_setopt_array($lykkepayCurl, array(
+		            CURLOPT_URL => $action_adr,
+		            CURLOPT_RETURNTRANSFER => true,
+		            CURLOPT_POST => true,
+		            CURLOPT_POSTFIELDS => http_build_query($args)
+	            ));
+	            $response = curl_exec($lykkepayCurl);
+	            curl_close($lykkepayCurl);
+	            $response = json_decode($response, true);
 
-                $order_id = $_GET['order_id'];
-                $order = new WC_Order($order_id);
-                $order->update_status('processing', __('Платеж успешно оплачен', 'woocommerce'));
-                WC()->cart->empty_cart();
-                $order->payment_complete();
-                wp_redirect($this->get_return_url($order));
-                exit;
+	            $errorCode = $response['ErrorCode'];
+	            if ($errorCode == 0) {
+	                //if ($response['Status'] == 'Unpaid') {
+		                $order_id = $_GET['order_id'];
+		                $order    = new WC_Order( $order_id );
+		                $order->update_status( 'processing', __( 'Платеж успешно оплачен', 'woocommerce' ) );
+		                WC()->cart->empty_cart();
+		                $order->payment_complete();
+		                wp_redirect( $this->get_return_url( $order ) );
+		                exit;
+	                //}
+	            }
             }
         }
 
@@ -81,8 +91,8 @@ function woocommerce_lykkepay()
 
             $this->id = LYKKEPAY_ID;
             $this->has_fields = false;
-            $this->liveurl = LYKKE_PROD_URL;
-            $this->testurl = LYKKE_TEST_URL;
+            $this->liveurl = $this->get_option('produrl');//LYKKE_PROD_URL;
+            $this->testurl = $this->get_option('testurl');
 
             // Load the settings
             $this->init_form_fields();
@@ -160,6 +170,18 @@ function woocommerce_lykkepay()
                     'label' => __('Включен', 'woocommerce'),
                     'default' => 'yes'
                 ),
+                'produrl' => array(
+	                'title' => __('URL Production API', 'woocommerce'),
+	                'type' => 'text',
+	                'description' => __('URL Production API.', 'woocommerce'),
+	                'default' => ''
+                ),
+                'testurl' => array(
+	                'title' => __('URL Test API', 'woocommerce'),
+	                'type' => 'text',
+	                'description' => __('URL Test API.', 'woocommerce'),
+	                'default' => ''
+                ),
                 'title' => array(
                     'title' => __('Название', 'woocommerce'),
                     'type' => 'text',
@@ -209,7 +231,7 @@ function woocommerce_lykkepay()
             }
 
 	        $extra_url_param = '&wc-callb=callback_function';//GA
-	        //$action_adr .= '';
+	        $action_adr .= 'create';
             $_SESSION['merchantId'] = $this->merchantId;
             $_SESSION['signature'] = $this->signature;
             $_SESSION['testmode'] = $this->testmode;
@@ -219,7 +241,7 @@ function woocommerce_lykkepay()
                     'signature' => $this->signature,
                     'InvoiceNumber' => $order_id, //. '_' . $i,
                     'amount' => $order->order_total,
-                    'clientName' => $order->get_billing_first_name(),
+                    'clientName' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
                     'clientEmail' => $order->get_billing_email(),
                     'currency' => 'CHF',
                     'callbackUrl' => SHOP_URL . '?wc-api=WC_LYKKEPAY&lykkepay=result&order_id=' . $order_id . $extra_url_param,
@@ -237,6 +259,7 @@ function woocommerce_lykkepay()
 
             $errorCode = $response['ErrorCode'];
             if ($errorCode == 0) {
+	            $_SESSION['invoiceid'] = $response['InvoiceId'];
                 return '<p>' . __('Спасибо за Ваш заказ, пожалуйста, нажмите кнопку ниже, чтобы заплатить.', 'woocommerce') . '</p>' .
                 '<a class="button cancel" href="' . $response['InvoiceURL'] . '">' . __('Оплатить', 'woocommerce') . '</a>' .
                 '<a class="button cancel" href="' . $order->get_cancel_order_url() . '">' . __('Отказаться от оплаты & вернуться в корзину', 'woocommerce') . '</a>';

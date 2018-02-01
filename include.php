@@ -2,8 +2,8 @@
 /**
  * URL API платежного шлюза
  */
-define('LYKKE_PROD_URL', 'http://localhost:5000/api/Invoice');
-define('LYKKE_TEST_URL', 'http://localhost:5000/api/Invoice');
+define('LYKKE_PROD_URL', 'http://localhost:5000/api/Invoice/');
+define('LYKKE_TEST_URL', 'http://localhost:5000/api/Invoice/');
 
 /**
  * Логирование
