@@ -102,6 +102,7 @@ function woocommerce_lykkepay()
             $this->title = $this->get_option('title');
             $this->merchantId = $this->get_option('merchantId');
             $this->signature = $this->get_option('signature');
+	        $this->apikey = $this->get_option('apikey');
             $this->testmode = $this->get_option('testmode');
             $this->description = $this->get_option('description');
 
@@ -194,9 +195,15 @@ function woocommerce_lykkepay()
                     'description' => __('Пожалуйста введите merchantId', 'woocommerce'),
                     'default' => ''
                 ),
+                'apikey' => array(
+	                'title' => __('apikey', 'woocommerce'),
+	                'type' => 'text',
+	                'description' => __('Пожалуйста введите apikey', 'woocommerce'),
+	                'default' => ''
+                ),
                 'signature' => array(
                     'title' => __('signature', 'woocommerce'),
-                    'type' => 'text',
+                    'type' => 'textarea',
                     'description' => __('Пожалуйста введите signature.', 'woocommerce'),
                     'default' => ''
                 ),
@@ -235,10 +242,10 @@ function woocommerce_lykkepay()
             $_SESSION['merchantId'] = $this->merchantId;
             $_SESSION['signature'] = $this->signature;
             $_SESSION['testmode'] = $this->testmode;
+	        $_SESSION['apikey'] = $this->apikey;
 
             $args = array(
                     'merchantId' => $this->merchantId,
-                    'signature' => $this->signature,
                     'InvoiceNumber' => $order_id, //. '_' . $i,
                     'amount' => $order->order_total,
                     'clientName' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
@@ -246,13 +253,23 @@ function woocommerce_lykkepay()
                     'currency' => 'CHF',
                     'callbackUrl' => SHOP_URL . '?wc-api=WC_LYKKEPAY&lykkepay=result&order_id=' . $order_id . $extra_url_param,
             );
-            $lykkepayCurl = curl_init();
-            curl_setopt_array($lykkepayCurl, array(
-                    CURLOPT_URL => $action_adr,
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => http_build_query($args)
-            ));
+	        $pkeyid = openssl_pkey_get_private($this->signature);
+	        openssl_sign($this->apikey.http_build_query($args), $signature, $pkeyid, OPENSSL_ALGO_SHA256);
+	        $sign = base64_encode($signature);
+
+	        $lykkepayCurl = curl_init();
+	        $headers = [
+		        'Lykke-Merchant-Id: '.$this->merchantId,
+		        'Lykke-Merchant-Sign: '.$sign
+	        ];
+	        curl_setopt_array($lykkepayCurl, array(
+		        CURLOPT_URL => $action_adr,
+		        CURLOPT_RETURNTRANSFER => true,
+		        CURLOPT_POST => true,
+		        CURLOPT_HTTPHEADER => $headers,
+		        CURLOPT_POSTFIELDS => http_build_query($args)
+	        ));
+
             $response = curl_exec($lykkepayCurl);
             curl_close($lykkepayCurl);
             $response = json_decode($response, true);
