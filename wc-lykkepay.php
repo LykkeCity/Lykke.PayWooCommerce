@@ -1,13 +1,14 @@
 <?php
 /*
-  Plugin Name: Платежный шлюз LykkePay
-  Description: Позволяет использовать платежный шлюз LykkePay с плагином WooCommerce
+  Plugin Name: LykkePay payment gateway
+  Description: Accept Bitcoin, Ethereum and other Crypto as a payment with LykkePay payment gateway
   Version: 1.0.0
  */
 
 session_start();
 require_once 'include.php';
 require_once 'text.php';
+require_once 'cron.php';
 
 if (!defined('ABSPATH')) exit;
 
@@ -24,6 +25,7 @@ function woocommerce_lykkepay()
 
     class WC_LYKKEPAY extends WC_Payment_Gateway
     {
+
         function lykke_logger($var)
         {
             if ($var) {
@@ -42,38 +44,22 @@ function woocommerce_lykkepay()
 
         function callb()
         {
-
             if (isset($_GET['lykkepay']) AND $_GET['lykkepay'] == 'result') {
-                if ($_SESSION['testmode'] == 'yes') {
-                    $action_adr = LYKKE_TEST_URL;
-                } else {
-                    $action_adr = LYKKE_PROD_URL;
-                }
-
-                $action_adr .= 'status';
 
                 $args = array(
-                    'invoiceId' => $_SESSION['invoiceid']
+                    'orderId' =>$_GET['order_id'].';'.$_SESSION['invoiceId'],
                 );
-	            $lykkepayCurl = curl_init();
-	            curl_setopt_array($lykkepayCurl, array(
-		            CURLOPT_URL => $action_adr,
-		            CURLOPT_RETURNTRANSFER => true,
-		            CURLOPT_POST => true,
-		            CURLOPT_POSTFIELDS => http_build_query($args)
-	            ));
-	            $response = curl_exec($lykkepayCurl);
-	            curl_close($lykkepayCurl);
-	            $response = json_decode($response, true);
-
-	            $errorCode = $response['ErrorCode'];
+	            $errorCode = 0;
 	            if ($errorCode == 0) {
-	                //if ($response['Status'] == 'Unpaid') {
-		                $order_id = $_GET['order_id'];
-		                $order    = new WC_Order( $order_id );
-		                $order->update_status( 'processing', __( 'Платеж успешно оплачен', 'woocommerce' ) );
-		                WC()->cart->empty_cart();
-		                $order->payment_complete();
+		            $order_id = $_GET['order_id'];
+		            $order    = new WC_Order( $order_id );
+		            WC()->cart->empty_cart();
+	                //if ($response['status'] == 'Unpaid') {
+
+		                cronstarter_activation($args);
+		                $order->update_status( 'pending', __( 'Payment has been received', 'woocommerce' ) );
+
+		                //$order->payment_complete();
 		                wp_redirect( $this->get_return_url( $order ) );
 		                exit;
 	                //}
@@ -125,9 +111,9 @@ function woocommerce_lykkepay()
          */
         function is_valid_for_use()
         {
-            //if (!in_array(get_option('woocommerce_currency'), array('CHF'))) {
-            //    return false;
-            //}
+            if (!in_array(get_option('woocommerce_currency'), array('CHF', 'USD'))) {
+                return false;
+            }
             return true;
         }
 
@@ -152,7 +138,7 @@ function woocommerce_lykkepay()
 
         <?php else : ?>
             <div class="inline error"><p>
-                    <strong><?php _e('Шлюз отключен', 'woocommerce'); ?></strong>: <?php _e($this->id . ' не поддерживает валюты Вашего магазина.', 'woocommerce'); ?>
+                    <strong><?php _e('Gateway is switched off', 'woocommerce'); ?></strong>: <?php _e($this->id . ' does not support currency of your web-store.', 'woocommerce'); ?>
                 </p></div>
             <?php
         endif;
@@ -166,9 +152,9 @@ function woocommerce_lykkepay()
         {
             $this->form_fields = array(
                 'enabled' => array(
-                    'title' => __('Включить/Выключить', 'woocommerce'),
+                    'title' => __('Enable/Disable', 'woocommerce'),
                     'type' => 'checkbox',
-                    'label' => __('Включен', 'woocommerce'),
+                    'label' => __('Enabled', 'woocommerce'),
                     'default' => 'yes'
                 ),
                 'produrl' => array(
@@ -184,41 +170,41 @@ function woocommerce_lykkepay()
 	                'default' => ''
                 ),
                 'title' => array(
-                    'title' => __('Название', 'woocommerce'),
+                    'title' => __('Title', 'woocommerce'),
                     'type' => 'text',
-                    'description' => __('Это название, которое пользователь видит во время проверки.', 'woocommerce'),
+                    'description' => __('This is the title a consumer sees when check in.', 'woocommerce'),
                     'default' => __(LYKKEPAY_NAME, 'woocommerce')
                 ),
                 'merchantId' => array(
                     'title' => __('merchantId', 'woocommerce'),
                     'type' => 'text',
-                    'description' => __('Пожалуйста введите merchantId', 'woocommerce'),
+                    'description' => __('Please provide merchantId', 'woocommerce'),
                     'default' => ''
                 ),
                 'apikey' => array(
 	                'title' => __('apikey', 'woocommerce'),
 	                'type' => 'text',
-	                'description' => __('Пожалуйста введите apikey', 'woocommerce'),
+	                'description' => __('Please provide apikey', 'woocommerce'),
 	                'default' => ''
                 ),
                 'signature' => array(
                     'title' => __('signature', 'woocommerce'),
                     'type' => 'textarea',
-                    'description' => __('Пожалуйста введите signature.', 'woocommerce'),
+                    'description' => __('Please provide signature.', 'woocommerce'),
                     'default' => ''
                 ),
                 'testmode' => array(
-                    'title' => __('Тест режим', 'woocommerce'),
+                    'title' => __('Test mode', 'woocommerce'),
                     'type' => 'checkbox',
                     'label' => __('Включен', 'woocommerce'),
-                    'description' => __('В этом режиме плата за товар не снимается.', 'woocommerce'),
+                    'description' => __('In this mode consumers will not be charged for purchases.', 'woocommerce'),
                     'default' => 'no'
                 ),
                 'description' => array(
                     'title' => __('Description', 'woocommerce'),
                     'type' => 'textarea',
-                    'description' => __('Описанием метода оплаты которое клиент будет видеть на вашем сайте.', 'woocommerce'),
-                    'default' => 'Оплата с помощью ' . LYKKEPAY_NAME
+                    'description' => __('Description of the payment method the customers will see on your web-site.', 'woocommerce'),
+                    'default' => 'Pay with ' . LYKKEPAY_NAME
                 )
             );
         }
@@ -238,7 +224,7 @@ function woocommerce_lykkepay()
             }
 
 	        $extra_url_param = '&wc-callb=callback_function';//GA
-	        $action_adr .= 'create';
+	        $action_adr .= 'Create';
             $_SESSION['merchantId'] = $this->merchantId;
             $_SESSION['signature'] = $this->signature;
             $_SESSION['testmode'] = $this->testmode;
@@ -247,10 +233,10 @@ function woocommerce_lykkepay()
             $args = array(
                     'merchantId' => $this->merchantId,
                     'InvoiceNumber' => $order_id, //. '_' . $i,
-                    'amount' => $order->order_total,
+                    'amount' => round($order->order_total, 0),
                     'clientName' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
                     'clientEmail' => $order->get_billing_email(),
-                    'currency' => 'CHF',
+                    'currency' => $order->get_currency(),
                     'callbackUrl' => SHOP_URL . '?wc-api=WC_LYKKEPAY&lykkepay=result&order_id=' . $order_id . $extra_url_param,
             );
 	        $pkeyid = openssl_pkey_get_private($this->signature);
@@ -274,15 +260,15 @@ function woocommerce_lykkepay()
             curl_close($lykkepayCurl);
             $response = json_decode($response, true);
 
-            $errorCode = $response['ErrorCode'];
+            $errorCode = $response['errorCode'];
             if ($errorCode == 0) {
-	            $_SESSION['invoiceid'] = $response['InvoiceId'];
-                return '<p>' . __('Спасибо за Ваш заказ, пожалуйста, нажмите кнопку ниже, чтобы заплатить.', 'woocommerce') . '</p>' .
-                '<a class="button cancel" href="' . $response['InvoiceURL'] . '">' . __('Оплатить', 'woocommerce') . '</a>' .
-                '<a class="button cancel" href="' . $order->get_cancel_order_url() . '">' . __('Отказаться от оплаты & вернуться в корзину', 'woocommerce') . '</a>';
+	            $_SESSION['invoiceId'] = $response['invoiceId'];
+                return '<p>' . __('Thank you for your order, please, click the button below in order to pay.', 'woocommerce') . '</p>' .
+                '<a class="button cancel" href="' . $response['invoiceURL'] . '">' . __('Pay', 'woocommerce') . '</a>' .
+                '<a class="button cancel" href="' . $order->get_cancel_order_url() . '">' . __('Cancel', 'woocommerce') . '</a>';
             } else {
-                return '<p>' . __('Ошибка #' . $errorCode . ': ' . $response['errorMessage'], 'woocommerce') . '</p>' .
-                '<a class="button cancel" href="' . $order->get_cancel_order_url() . '">' . __('Отказаться от оплаты & вернуться в корзину', 'woocommerce') . '</a>';
+                return '<p>' . __('Error #' . $errorCode . ': ' . $response['errorMessage'], 'woocommerce') . '</p>' .
+                '<a class="button cancel" href="' . $order->get_cancel_order_url() . '">' . __('Cancel', 'woocommerce') . '</a>';
             }
         }
 
@@ -306,66 +292,6 @@ function woocommerce_lykkepay()
         {
             echo $this->generate_form($order);
         }
-
-        /**
-         * Check response
-         */
-
-        function check_response()
-        {
-            global $woocommerce;
-
-            wp_redirect($this->get_return_url($order));
-            if (isset($_GET['lykkepay']) AND $_GET['lykkepay'] == 'result') {
-                if (DEBUG) {
-                    $action_adr = LYKKE_TEST_URL;
-                } else {
-                    $action_adr = LYKKE_PROD_URL;
-                }
-
-                $action_adr .= 'getOrderStatusExtended.do';
-
-                $args = array(
-                    'merchantId' => 'test',//$this->get_option('merchant'),
-                    'signature' => 'testPwd',//$this->get_option('password'),
-                    'orderId' => $_GET['orderId'],
-                );
-
-                $lykkepayCurl = curl_init();
-                curl_setopt_array($lykkepayCurl, array(
-                    CURLOPT_URL => $action_adr,
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => http_build_query($args)
-                ));
-                $response = curl_exec($lykkepayCurl);
-                curl_close($lykkepayCurl);
-                error_log($response);
-                $response = json_decode($response, true);
-
-                $orderStatus = $response['OrderStatus'];
-
-                if ($orderStatus == '1' || $orderStatus == '2') {
-                    $order_id = $_GET['order_id'];
-                    $order = new WC_Order($order_id);
-                    $order->update_status('completed', __('Платеж успешно оплачен', 'woocommerce'));
-                    WC()->cart->empty_cart();
-                    $order->payment_complete();
-                    wp_redirect($this->get_return_url($order));
-                    exit;
-                } else {
-                    $order_id = $_GET['order_id'];
-                    $order = new WC_Order($order_id);
-                    $order->update_status('failed', __('Платеж не оплачен', 'woocommerce'));
-                    add_filter('woocommerce_add_to_cart_message', 'my_cart_messages', 99);
-                    $order->cancel_order();
-                    $woocommerce->add_error(__('Ошибка в проведении оплаты<br/>' . $response['actionCodeDescription'], 'woocommerce'));
-                    wp_redirect($order->get_cancel_order_url());
-                    exit;
-                }
-            }
-        }
-
     }
 
     /**
